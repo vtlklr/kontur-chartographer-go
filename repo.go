@@ -40,6 +40,13 @@ func (r *Repository) GetChart(id int) (*Chart, error) {
 	}
 	return nil, fmt.Errorf("нет id")
 }
+func (r *Repository) DeleteChart(id int) error {
+	if _, ok := r.charts[id]; ok {
+		delete(r.charts, id)
+		return nil
+	}
+	return fmt.Errorf("нет id")
+}
 
 func (c *Chart) AddImage(x, y, width, heigth int) (Image, error) {
 	if x > c.Width || y > c.Heidth || x+width < 0 || y+heigth < 0 {

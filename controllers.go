@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
@@ -33,7 +34,6 @@ func init() {
 }
 
 func (s *Server) NewCharta(w http.ResponseWriter, r *http.Request) {
-	//fmt.Println("new charta")
 
 	width, err := strconv.Atoi(r.URL.Query().Get("width"))
 	height, err1 := strconv.Atoi(r.URL.Query().Get("height"))
@@ -54,7 +54,6 @@ func (s *Server) EditCharta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	fmt.Println(`id := `, id)
 	width, err := strconv.Atoi(r.URL.Query().Get("width"))
 	height, err1 := strconv.Atoi(r.URL.Query().Get("height"))
 	x, err2 := strconv.Atoi(r.URL.Query().Get("x"))
@@ -63,11 +62,14 @@ func (s *Server) EditCharta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	idInt, _ := strconv.Atoi(id)
+	idInt, err5 := strconv.Atoi(id)
+	if err5 != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	chart, err := s.repo.GetChart(idInt)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	img, err := chart.AddImage(x, y, width, height)
@@ -76,8 +78,8 @@ func (s *Server) EditCharta(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err.Error())
 		return
 	}
-	//fmt.Println(img.Id)
-	file, fileHeader, err := r.FormFile("file")
+	//file, fileHeader, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	defer func(file multipart.File) {
 		err := file.Close()
 		if err != nil {
@@ -87,8 +89,7 @@ func (s *Server) EditCharta(w http.ResponseWriter, r *http.Request) {
 	f, err := os.OpenFile(img.FileName, os.O_WRONLY|os.O_CREATE, 0666)
 	defer f.Close()
 	io.Copy(f, file)
-	fmt.Println(fileHeader)
-
+	w.WriteHeader(http.StatusOK)
 }
 func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -97,7 +98,6 @@ func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	//fmt.Println(`get id := `, id)
 	width, err := strconv.Atoi(r.URL.Query().Get("width"))
 	height, err1 := strconv.Atoi(r.URL.Query().Get("height"))
 	x, err2 := strconv.Atoi(r.URL.Query().Get("x"))
@@ -106,13 +106,47 @@ func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	idInt, _ := strconv.Atoi(id)
-	chart, err := s.repo.GetChart(idInt)
-	if err != nil {
+
+	idInt, err1 := strconv.Atoi(id)
+	if err1 != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Println(err.Error())
 		return
 	}
+	chart, err := s.repo.GetChart(idInt)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if x+width < 0 || x > chart.Width || y+height < 0 || y > chart.Width {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	imgIds := getImages(x, y, width, height, chart)
+
+	file := bytes.NewBuffer(nil)
+	background := image.NewRGBA(image.Rect(x, y, x+width, y+height))
+	black := image.NewUniform(color.RGBA{})
+	draw.Draw(background, background.Bounds(), black, image.Point{}, draw.Src)
+
+	rectOver := background.Bounds().Intersect(image.Rect(0, 0, chart.Width, chart.Heidth))
+	for _, id := range imgIds {
+		imgFile, _ := os.Open(chart.Images[id].FileName)
+		defer imgFile.Close()
+		r1 := image.Rect(chart.Images[id].X, chart.Images[id].Y, chart.Images[id].X+chart.Images[id].Width, chart.Images[id].Y+chart.Images[id].Heidth)
+		r1 = r1.Bounds().Intersect(rectOver)
+
+		img, _ := bmp.Decode(imgFile)
+		draw.Draw(background, r1, img, image.Point{}, draw.Src)
+	}
+
+	bmp.Encode(file, background)
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	f, _ := ioutil.ReadAll(file)
+	w.Write(f)
+}
+
+func getImages(x, y, width, height int, chart *Chart) []int {
 	var imgIds []int
 	for id, img := range chart.Images {
 		if (x <= img.X && img.X <= x+width && y <= img.Y && img.Y <= y+height) ||
@@ -122,56 +156,32 @@ func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 			imgIds = append(imgIds, id)
 		}
 	}
-	//fmt.Println(imgIds)
-	fileName := fmt.Sprintf("chart%dx%dy%dwidth%dheight%d.bmp", chart.Id, x, y, width, height)
-	file, err := os.Create(fileName)
-	if err != nil {
-		fmt.Println("файл не создан")
-		return
-	}
-	defer os.Remove(fileName)
-	defer file.Close()
-	background := image.NewRGBA(image.Rect(x, y, x+width, y+height))
-	black := image.NewUniform(color.RGBA{})
-	draw.Draw(background, background.Bounds(), black, image.Point{}, draw.Src)
-
-	rectOver := background.Bounds().Intersect(image.Rect(0, 0, chart.Width, chart.Heidth))
-	//fmt.Println(rectOver.Bounds())
-	for _, id := range imgIds {
-		imgFile, _ := os.Open(chart.Images[id].FileName)
-		defer imgFile.Close()
-		img, _ := bmp.Decode(imgFile)
-		r1 := image.Rect(chart.Images[id].X, chart.Images[id].Y, chart.Images[id].X+chart.Images[id].Width, chart.Images[id].Y+chart.Images[id].Heidth)
-		r1 = r1.Bounds().Intersect(rectOver)
-		draw.Draw(background, r1, img, image.Point{}, draw.Src)
-	}
-
-	bmp.Encode(file, background)
-	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	fileBytes, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		panic(err)
-	}
-	w.Write(fileBytes)
+	return imgIds
 }
 func (s *Server) DeleteCharta(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, ok := vars["id"]
-	idInt, _ := strconv.Atoi(id)
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	idInt, err1 := strconv.Atoi(id)
+	if err1 != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	chart, err := s.repo.GetChart(idInt)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
 	for _, img := range chart.Images {
-		err1 := os.Remove(img.FileName)
-		if err1 != nil || !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+		os.Remove(img.FileName)
+	}
+	if err := s.repo.DeleteChart(idInt); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 
