@@ -11,12 +11,10 @@ import (
 	"image/color"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 )
 
 type Server struct {
@@ -27,10 +25,6 @@ func NewServer(repo *Repository) *Server {
 	return &Server{
 		repo: repo,
 	}
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
 }
 
 func (s *Server) NewCharta(w http.ResponseWriter, r *http.Request) {
@@ -87,8 +81,13 @@ func (s *Server) EditCharta(w http.ResponseWriter, r *http.Request) {
 		}
 	}(file)
 	f, err := os.OpenFile(img.FileName, os.O_WRONLY|os.O_CREATE, 0666)
-	defer f.Close()
-	io.Copy(f, file)
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			fmt.Println("ошибка закрытия файла" + img.FileName)
+		}
+	}(f)
+	_, _ = io.Copy(f, file)
 	w.WriteHeader(http.StatusOK)
 }
 func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +122,6 @@ func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 	}
 	imgIds := getImages(x, y, width, height, chart)
 
-	file := bytes.NewBuffer(nil)
 	background := image.NewRGBA(image.Rect(x, y, x+width, y+height))
 	black := image.NewUniform(color.RGBA{})
 	draw.Draw(background, background.Bounds(), black, image.Point{}, draw.Src)
@@ -131,19 +129,22 @@ func (s *Server) GetCharta(w http.ResponseWriter, r *http.Request) {
 	rectOver := background.Bounds().Intersect(image.Rect(0, 0, chart.Width, chart.Heidth))
 	for _, id := range imgIds {
 		imgFile, _ := os.Open(chart.Images[id].FileName)
-		defer imgFile.Close()
+		defer func(imgFile *os.File) {
+			_ = imgFile.Close()
+		}(imgFile)
 		r1 := image.Rect(chart.Images[id].X, chart.Images[id].Y, chart.Images[id].X+chart.Images[id].Width, chart.Images[id].Y+chart.Images[id].Heidth)
 		r1 = r1.Bounds().Intersect(rectOver)
+		//var img1 multipart.Form
 
-		img, _ := bmp.Decode(imgFile)
-		draw.Draw(background, r1, img, image.Point{}, draw.Src)
+		img1, _ := bmp.Decode(imgFile)
+		draw.Draw(background, r1, img1, image.Point{}, draw.Src)
 	}
-
-	bmp.Encode(file, background)
+	buf := bytes.NewBuffer(nil)
+	_ = bmp.Encode(buf, background)
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/octet-stream")
-	f, _ := ioutil.ReadAll(file)
-	w.Write(f)
+	f, _ := ioutil.ReadAll(buf)
+	_, _ = w.Write(f)
 }
 
 func getImages(x, y, width, height int, chart *Chart) []int {
@@ -177,7 +178,7 @@ func (s *Server) DeleteCharta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, img := range chart.Images {
-		os.Remove(img.FileName)
+		_ = os.Remove(img.FileName)
 	}
 	if err := s.repo.DeleteChart(idInt); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
