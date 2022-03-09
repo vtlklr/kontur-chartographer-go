@@ -1,18 +1,21 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 type Repository struct {
 	charts  map[int]*Chart
-	counter int
+	counter uint32
 }
 
 type Chart struct {
 	Heidth  int
 	Width   int
-	Id      int
+	Id      uint32
 	Images  []Image
-	counter int
+	counter uint32
 }
 
 type Image struct {
@@ -20,7 +23,6 @@ type Image struct {
 	Y        int
 	Heidth   int
 	Width    int
-	Id       int
 	FileName string
 }
 
@@ -30,7 +32,7 @@ func New() *Repository {
 
 func (r *Repository) AddChart(width, heidth int) *Chart {
 	c := &Chart{Heidth: heidth, Width: width, Id: r.nextCount()}
-	r.charts[c.Id] = c
+	r.charts[int(c.Id)] = c
 	return c
 }
 
@@ -52,19 +54,22 @@ func (c *Chart) AddImage(x, y, width, heigth int) (Image, error) {
 	if x > c.Width || y > c.Heidth || x+width < 0 || y+heigth < 0 {
 		return Image{}, fmt.Errorf("не правильные координиаты")
 	}
-	img := Image{X: x, Y: y, Width: width, Heidth: heigth, Id: c.nextCount()}
-	img.FileName = fmt.Sprintf("chart%dimg%d.bmp", c.Id, img.Id)
+	c.nextCount()
+	img := Image{X: x, Y: y, Width: width, Heidth: heigth}
+	img.FileName = fmt.Sprintf("chart%dimg%d.bmp", c.Id, c.counter)
 	c.Images = append(c.Images, img)
 
 	return img, nil
 }
 
-func (r *Repository) nextCount() int {
-	r.counter = r.counter + 1
+func (r *Repository) nextCount() uint32 {
+	//r.counter = r.counter + 1
+	atomic.AddUint32(&r.counter, 1)
 	return r.counter
 }
 
-func (c *Chart) nextCount() int {
-	c.counter = c.counter + 1
+func (c *Chart) nextCount() uint32 {
+	//c.counter = c.counter + 1
+	atomic.AddUint32(&c.counter, 1)
 	return c.counter
 }
